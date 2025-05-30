@@ -28,6 +28,8 @@ let questions = JSON.parse(localStorage.getItem('questions') || '[]');
 questions.forEach(q => {
   q.score = q.score ?? 0;
   q.category = q.category ?? '';
+  q.answerCount = q.answerCount ?? 0;
+  q.correctCount = q.correctCount ?? 0;
 });
 
 const password = prompt("パスワードを入力してください：");
@@ -53,7 +55,7 @@ function saveQuestion() {
   const a = document.getElementById('newAnswer').value.trim();
   const c = document.getElementById('newCategory').value.trim();
   if (q && a) {
-    questions.push({ question: q, answer: a, category: c, queue: 0, origin: true, score: 0 });
+    questions.push({ question: q, answer: a, category: c, queue: 0, origin: true, score: 0, answerCount: 0, correctCount: 0 });
     localStorage.setItem('questions', JSON.stringify(questions));
     document.getElementById('newQuestion').value = '';
     document.getElementById('newAnswer').value = '';
@@ -72,14 +74,16 @@ function renderList() {
     grouped[cat].push({ ...qa, index: i });
   });
 
+  let count = 1;
   Object.keys(grouped).forEach(cat => {
     const groupTitle = document.createElement('h3');
     groupTitle.textContent = `カテゴリ: ${cat}`;
     list.appendChild(groupTitle);
     grouped[cat].forEach(qa => {
       const scoreClass = qa.score <= -3 ? 'red' : (qa.score >= 3 ? 'green' : '');
+      const rate = (qa.answerCount > 0) ? ((qa.correctCount / qa.answerCount) * 100).toFixed(1) : '0.0';
       const li = document.createElement('li');
-      li.innerHTML = `Q${qa.index + 1}: <input value="${qa.question}" onchange="editQuestion(${qa.index}, 'question', this.value)"> ／ A: <input value="${qa.answer}" onchange="editQuestion(${qa.index}, 'answer', this.value)"> ／ カテゴリ: <input value="${qa.category}" onchange="editQuestion(${qa.index}, 'category', this.value)"><span class="score ${scoreClass}">（${qa.score}）</span>`;
+      li.innerHTML = `Q${count++}: <input value="${qa.question}" onchange="editQuestion(${qa.index}, 'question', this.value)"> ／ A: <input value="${qa.answer}" onchange="editQuestion(${qa.index}, 'answer', this.value)"> ／ カテゴリ: <input value="${qa.category}" onchange="editQuestion(${qa.index}, 'category', this.value)"><span class="score ${scoreClass}">（${qa.score}）</span> 回答数: ${qa.answerCount} ／ 正答率: ${rate}%`;
       list.appendChild(li);
     });
   });
@@ -88,6 +92,38 @@ function renderList() {
 function editQuestion(index, field, value) {
   questions[index][field] = value;
   localStorage.setItem('questions', JSON.stringify(questions));
+}
+
+function gradeAnswer(grade) {
+  const q = currentQueue[currentIndex];
+  const delta = grade === 'maru' ? 1 : grade === 'sankaku' ? -0.5 : -1;
+  questions[q.index].score = (questions[q.index].score ?? 0) + delta;
+  questions[q.index].answerCount = (questions[q.index].answerCount ?? 0) + 1;
+  if (grade === 'maru') questions[q.index].correctCount = (questions[q.index].correctCount ?? 0) + 1;
+  localStorage.setItem('questions', JSON.stringify(questions));
+  currentIndex++;
+  nextQuestion();
+}
+
+function nextQuestion() {
+  if (currentIndex >= currentQueue.length) {
+    alert('全問終了');
+    return;
+  }
+  const q = currentQueue[currentIndex];
+  document.getElementById('exerciseQuestion').textContent = `Q${q.index + 1}: ${q.question}`;
+  document.getElementById('exerciseAnswer').value = '';
+  document.getElementById('correctAnswer').textContent = '';
+  showAnswerToggle = false;
+}
+
+function checkEnter(event) {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    showAnswerToggle = !showAnswerToggle;
+    const answerDisplay = document.getElementById('correctAnswer');
+    answerDisplay.textContent = showAnswerToggle ? '正解: ' + currentQueue[currentIndex].answer : '';
+  }
 }
 
 function startExercise() {
@@ -118,6 +154,13 @@ function startLowScoreExercise() {
   nextQuestion();
 }
 
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+
 function updateCategoryOptions() {
   const select = document.getElementById('categorySelect');
   if (!select) return;
@@ -146,43 +189,6 @@ function startExerciseByCategory() {
   nextQuestion();
 }
 
-function shuffle(arr) {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-}
-
-function nextQuestion() {
-  if (currentIndex >= currentQueue.length) {
-    alert('全問終了');
-    return;
-  }
-  const q = currentQueue[currentIndex];
-  document.getElementById('exerciseQuestion').textContent = `Q${q.index + 1}: ${q.question}`;
-  document.getElementById('exerciseAnswer').value = '';
-  document.getElementById('correctAnswer').textContent = '';
-  showAnswerToggle = false;
-}
-
-function checkEnter(event) {
-  if (event.key === 'Enter') {
-    event.preventDefault();
-    showAnswerToggle = !showAnswerToggle;
-    const answerDisplay = document.getElementById('correctAnswer');
-    answerDisplay.textContent = showAnswerToggle ? '正解: ' + currentQueue[currentIndex].answer : '';
-  }
-}
-
-function gradeAnswer(grade) {
-  const q = currentQueue[currentIndex];
-  const delta = grade === 'maru' ? 1 : grade === 'sankaku' ? -0.5 : -1;
-  questions[q.index].score = (questions[q.index].score ?? 0) + delta;
-  localStorage.setItem('questions', JSON.stringify(questions));
-  currentIndex++;
-  nextQuestion();
-}
-
 function downloadQuestions() {
   const original = questions.filter(q => q.origin);
   const blob = new Blob([JSON.stringify(original, null, 2)], { type: 'application/json' });
@@ -204,7 +210,14 @@ function uploadQuestions() {
     try {
       const data = JSON.parse(e.target.result);
       if (!Array.isArray(data)) throw new Error();
-      questions = data.map(q => ({ ...q, origin: true, score: q.score ?? 0, category: q.category ?? '' }));
+      questions = data.map(q => ({
+        ...q,
+        origin: true,
+        score: q.score ?? 0,
+        category: q.category ?? '',
+        answerCount: q.answerCount ?? 0,
+        correctCount: q.correctCount ?? 0
+      }));
       localStorage.setItem('questions', JSON.stringify(questions));
       alert('インポート完了');
       renderList();
@@ -231,7 +244,6 @@ function renderChart() {
     if (!q.origin) return;
     const cat = q.category || '未分類';
     if (!categoryStats[cat]) categoryStats[cat] = { correct: 0, total: 0 };
-
     const s = q.score ?? 0;
     const absS = Math.abs(s);
     if (absS > 0) {
@@ -239,14 +251,12 @@ function renderChart() {
       if (s > 0) categoryStats[cat].correct += s;
     }
   });
-
   const labels = Object.keys(categoryStats);
   const data = labels.map(cat => {
     const { correct, total } = categoryStats[cat];
     const rate = total === 0 ? 0 : correct / total;
     return parseFloat((rate * 100).toFixed(2));
   });
-
   const ctx = document.getElementById('scoreChart').getContext('2d');
   if (window.scoreChartInstance) window.scoreChartInstance.destroy();
   window.scoreChartInstance = new Chart(ctx, {
@@ -269,6 +279,7 @@ function renderChart() {
 }
 </script>
 
+<!-- 以下HTML要素の続き（省略されていたボディ内） -->
 <div class="tabs">
   <div class="tab active" onclick="switchTab(0)">演習（A）</div>
   <div class="tab" onclick="switchTab(1)">入力（B）</div>
